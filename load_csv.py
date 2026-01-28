@@ -4,6 +4,7 @@ from collections import Counter
 
 import matplotlib.pyplot as plt
 import pandas as pd
+import seaborn as sns
 import joblib
 
 from sklearn.model_selection import train_test_split
@@ -14,42 +15,69 @@ from encode_scaler import EncodeAndScaler
 
 from datetime import date
 
+def classify_transmission(transmission):
+    if 'M/T' in transmission or 'MT' in transmission or 'MANUAL' in transmission:
+        return 'M/T'
+    elif 'A/T' in transmission or 'AT' in transmission or 'AUTOMATIC' in transmission:
+        return 'A/T'
+    else:
+        return 'OTHER'
+
 #load a csv
 data = pd.read_csv("csv/currUsedCars.csv")
 
-#fill in the blanks
-data["fuel_type"] = data["fuel_type"].fillna("Electric")
-data["accident"] = np.where(
-    data["accident"] == "At least 1 accident or damage reported",
-    "Yes",
-    "No"
-)
-data["clean_title"] = data["clean_title"].fillna("No")
-
-#erased the symbol $ and "mi" and prepared features for training
-def clean_engine(x):
-    x = str(x)
-    # search num with L
-    match_with_L = re.search(r'(\d+\.?\d*)L', x)
-    if match_with_L:
-        return match_with_L.group(1)
-
-    match_number = re.search(r'\d+\.?\d*', x)
-    if match_number:
-        return match_number.group(0)
-    return None  # якщо взагалі немає чисел
-data["engine"] = data["engine"].apply(clean_engine)
-valid_numbers = data["engine"].dropna()
-most_common = Counter(valid_numbers).most_common(1)[0][0]
-data["engine"] = data["engine"].fillna(most_common)
-
-#prepared for training
-data["milage"] = data["milage"].str.replace(r'[^0-9]', '', regex=True).astype(float)
 data["price"] = data["price"].replace('[$,]', '', regex=True).astype(float)
+
+#fill in the blanks and create new features
+data["brand"] = data["brand"].str.lower()
+
 data["age"] = date.today().year - data["model_year"]
 
+data["milage"] = data["milage"].str.replace(r'[^0-9]', '', regex=True).astype(int)
+data["milage_per_year"] = data['milage'] / data['age']
+
+data["fuel_type"] = data['fuel_type'].str.strip().str.lower()
+data['fuel_type'] = data['fuel_type'].replace({'plug-in hybrid': 'hybrid','not supported':'other','–':'other'})
+data['fuel_type'] = data['fuel_type'].fillna('other')
+
+
+data['hp'] = data['engine'].astype(str).str.extract(r'(\d+(?:\.\d+)?)\s*HP', expand=False).astype(float)
+data['hp'] = data.groupby('brand')['hp'].fillna(data['hp'].mean()).astype(int)
+
+
+data['engine_capacity'] = data['engine'].astype(str).str.extract(r'(\d+(?:\.\d+)?)\s*L', expand=False).astype(float)
+data['engine_capacity'] = data['engine_capacity'].fillna(data['engine_capacity'].mean())
+
+fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+
+sns.boxplot(x=data['milage'], ax=axes[0, 0])
+axes[0, 0].set_title("Boxplot of milage")
+
+sns.countplot(x=data['fuel_type'], ax=axes[0, 1])
+axes[0, 1].set_title("Countplot of fuel_type")
+
+sns.boxplot(x=data['hp'], ax=axes[1, 0])
+axes[1, 0].set_title("Boxplot of Horsepower")
+
+sns.boxplot(x=data['engine_capacity'], ax=axes[1, 1])
+axes[1, 1].set_title("Boxplot of engine_capacity")
+
+plt.tight_layout()
+plt.show()
+
+data['v_engine'] = data['engine'].str.contains(r'V\d+', case=False, na=False)
+
+data['turbo'] = data['engine'].str.contains('twin turbo', case=False, na=False)
+
+data['transmission'] = data['transmission'].apply(classify_transmission)
+
+data['accident'] = data['accident'].apply(lambda x: 1 if x == 'At least 1 accident or damage reported' else 0)
+
+data['clean_title'] = data['clean_title'].apply(lambda x: 1 if x == 'Yes' else 0)
+
+
 #Select X and y
-X = data.drop(columns=["price","model","int_col","ext_col","transmission","model_year","clean_title"])
+X = data.drop(columns=["price","model","int_col","ext_col","model_year","engine"])
 y = np.log1p(data["price"])
 
 #Encode and scaler
@@ -61,12 +89,7 @@ X_encode.to_csv("csv/afterPreprocessing.csv", index=False)
 X_train, X_test, y_train, y_test = train_test_split(X_encode,y, test_size=0.2,random_state=42)
 
 #Select model for predict
-model = RandomForestRegressor(
-    n_estimators=500,
-    max_depth=12,
-    random_state=42,
-    n_jobs=-1
-)
+model = RandomForestRegressor(random_state=42)
 #Teaching model
 model.fit(X_train, y_train)
 
@@ -82,7 +105,6 @@ print(f"RMSE: {rmse:.2f}")
 print(f"R2 score: {r2:.2f}")
 
 plt.scatter(y_test, y_pred, alpha=0.5)
-
 plt.xlabel("Actual price (log)")
 plt.ylabel("Predicted price (log)")
 plt.title("Actual vs Predicted Prices")

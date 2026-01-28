@@ -4,8 +4,8 @@ import joblib
 def EncodeAndScaler(X,y=None, mode="train"):
     X_encode = X.copy()
 
-    numerical_cols = ['age', 'milage']
-    target_encode_cols = ["brand", "fuel_type","engine"]
+    numerical_cols = ['age', 'milage_per_year','hp',"milage","accident"]
+    target_encode_cols = ["brand", "fuel_type","transmission"]
 
     categorical_cols = (
         X_encode.select_dtypes(include="object").columns.drop(target_encode_cols, errors="ignore")
